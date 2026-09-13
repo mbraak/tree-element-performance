@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>tree-element render benchmark</title>
+<link rel="stylesheet" href="/vendor/tree-element/tree_element.css" />
+<link rel="stylesheet" href="/bench.css" />
+</head>
+<body>
+<header>
+  <h1>tree-element render benchmark</h1>
+  <p class="meta" id="meta">loading…</p>
+</header>
+
+<main>
+  <section class="panel controls">
+    <form id="form" autocomplete="off">
+      <div class="grid">
+        <label>Total nodes
+          <input name="nodes" type="number" min="1" max="2000000" value="50000" />
+        </label>
+        <label>Children per folder
+          <input name="children" type="number" min="1" max="100000" value="10" />
+        </label>
+        <label>Extra name length
+          <input name="nameLength" type="number" min="0" max="1000" value="0" title="Pad node names to this length" />
+        </label>
+        <label>Scenario
+          <select name="scenario">
+            <option value="render">Initial render (new TreeElement)</option>
+            <option value="refresh">refresh() of an existing tree</option>
+            <option value="open">openNode() on the first top-level folder</option>
+            <option value="toggle">toggle() first folder closed + open</option>
+          </select>
+        </label>
+        <label>autoOpen
+          <select name="autoOpen">
+            <option value="true">true (everything expanded)</option>
+            <option value="0">0 (first level)</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="false">false (all closed)</option>
+          </select>
+        </label>
+        <label>Runs
+          <input name="runs" type="number" min="1" max="100" value="5" />
+        </label>
+        <label class="check"><input name="warmup" type="checkbox" checked /> Warm-up run (not counted)</label>
+        <label class="check"><input name="dragAndDrop" type="checkbox" /> dragAndDrop</label>
+        <label class="check"><input name="keyboardSupport" type="checkbox" checked /> keyboardSupport</label>
+        <label class="check"><input name="showEmptyFolder" type="checkbox" /> showEmptyFolder</label>
+        <label class="check"><input name="save" type="checkbox" /> Save result to server</label>
+      </div>
+      <div class="actions">
+        <button type="submit" id="run">Run benchmark</button>
+        <button type="button" id="stop" disabled>Stop</button>
+        <span id="status" class="status"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>Result</h2>
+    <div id="summary" class="summary"><p class="muted">No run yet.</p></div>
+    <details id="runsDetails">
+      <summary>Per-run measurements</summary>
+      <table id="runsTable" class="table">
+        <thead><tr>
+          <th>#</th><th>construct</th><th>layout</th><th>to frame</th><th>total</th><th>li rendered</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </details>
+    <p class="muted small">
+      <b>construct</b>: synchronous JavaScript time of the measured call (DOM built, not yet laid out).
+      <b>layout</b>: a forced <code>getBoundingClientRect()</code> right after, i.e. style + layout.
+      <b>to frame</b>: time from start until the browser has presented a frame (two <code>requestAnimationFrame</code>s).
+      <b>total</b> = to frame. All values in milliseconds. Marks and measures are also visible in the DevTools Performance panel.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Tree</h2>
+    <p class="muted small">The tree below is the one being measured, rendered in a scrollable box.</p>
+    <div id="treeHost" class="tree-host"></div>
+  </section>
+
+  <section class="panel">
+    <h2>History <span class="muted small">(results/results.ndjson)</span></h2>
+    <div class="actions">
+      <button type="button" id="reload">Reload</button>
+      <button type="button" id="clear" class="danger">Clear history</button>
+    </div>
+    <div class="scroll">
+    <table id="history" class="table">
+      <thead><tr>
+        <th>saved</th><th>version</th><th>scenario</th><th>nodes</th><th>children</th><th>autoOpen</th>
+        <th>runs</th><th>median</th><th>mean</th><th>min</th><th>max</th><th>li</th><th>browser</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+  </section>
+</main>
+
+<script src="/vendor/tree-element/tree_element.js"></script>
+<script src="/bench.js"></script>
+</body>
+</html>

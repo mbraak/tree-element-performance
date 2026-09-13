@@ -1,0 +1,17 @@
+{
+  "name": "tree-element-performance",
+  "version": "1.0.0",
+  "description": "Local browser benchmark for how fast tree-element renders a very big tree",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "bench": "node bench-headless.mjs"
+  },
+  "dependencies": {
+    "tree-element": "^0.1.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}
