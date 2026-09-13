@@ -5,6 +5,7 @@
 //   npm i -D playwright && npx playwright install chromium
 //   node bench-headless.mjs --nodes=100000 --children=10 --runs=5
 //   node bench-headless.mjs --browser=firefox --scenario=refresh --headed --save
+//   node bench-headless.mjs --library=jstree --nodes=20000
 
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -21,6 +22,7 @@ const args = Object.fromEntries(
 
 if (args.help) {
   console.log(`Usage: node bench-headless.mjs [options]
+  --library=L        tree-element | jstree (default tree-element)
   --nodes=N          total nodes (default 50000)
   --children=N       children per folder (default 10)
   --nameLength=N     pad node names to this length (default 0)
@@ -69,6 +71,7 @@ if (!baseUrl) {
 
 const params = new URLSearchParams({
   auto: "1",
+  library: args.library ?? "tree-element",
   nodes: args.nodes ?? "50000",
   children: args.children ?? "10",
   nameLength: args.nameLength ?? "0",
@@ -104,7 +107,7 @@ try {
   } else {
     const s = result.stats;
     const f = (n) => n.toFixed(1).padStart(9);
-    console.log(`\n${result.browser} · tree-element ${result.treeElementVersion ?? ""} · scenario ${result.config.scenario} · autoOpen ${result.config.autoOpen}`);
+    console.log(`\n${result.browser} · ${result.libraryLabel} ${result.libraryVersion} · scenario ${result.config.scenario} · autoOpen ${result.config.autoOpen}`);
     console.log(`nodes ${result.data.count.toLocaleString()} · depth ${result.data.maxDepth} · li rendered ${result.liCount.toLocaleString()} · ${s.total.n} runs\n`);
     console.log(`               median      mean       min       max     stdev`);
     for (const k of ["construct", "layout", "toFrame"]) {

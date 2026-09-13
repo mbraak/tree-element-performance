@@ -12,6 +12,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const VENDOR_DIR = path.join(__dirname, "node_modules", "tree-element");
+// Packages exposed under /vendor/<name>/ (only these, nothing else from node_modules).
+const VENDOR_PACKAGES = ["tree-element", "jstree", "jquery"];
 const RESULTS_FILE = path.join(__dirname, "results", "results.ndjson");
 
 const MIME = {
@@ -203,8 +205,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ---- Static files ----------------------------------------------------
-    if (pathname.startsWith("/vendor/tree-element/")) {
-      return serveFile(res, VENDOR_DIR, pathname.slice("/vendor/tree-element/".length));
+    if (pathname.startsWith("/vendor/")) {
+      const [, , pkg, ...rest] = pathname.split("/");
+      if (!VENDOR_PACKAGES.includes(pkg)) return send(res, 404, `Unknown vendor package: ${pkg}`);
+      return serveFile(res, path.join(__dirname, "node_modules", pkg), rest.join("/"));
     }
 
     const rel = pathname === "/" ? "index.html" : pathname.slice(1);

@@ -1,8 +1,10 @@
 # tree-element render benchmark
 
 Measures how fast [tree-element](https://github.com/mbraak/tree-element) renders
-a very big tree in a real browser. A tiny dependency-free Node server serves the
-page and the library, generates the tree data and stores results.
+a very big tree in a real browser, and runs the identical benchmark against
+[jsTree](https://www.jstree.com/) for comparison. A tiny dependency-free Node
+server serves the page and the libraries, generates the tree data and stores
+results.
 
 ## Run
 
@@ -11,7 +13,29 @@ npm install
 npm start          # http://127.0.0.1:3000/   (PORT=4000 npm start for another port)
 ```
 
-Open the page, pick the size and scenario, press **Run benchmark**.
+Open the page, pick the library, size and scenario, press **Run benchmark**.
+
+## Libraries
+
+| Library        | Loaded from                     | Notes                                                     |
+| -------------- | ------------------------------- | --------------------------------------------------------- |
+| `tree-element` | `node_modules/tree-element`     | `slide: false`, `saveState: false`                        |
+| `jstree`       | `node_modules/jstree` + jQuery  | `core.animation: 0`, default theme, `dnd` plugin if asked |
+
+Both get the same generated data. For jsTree it is converted to its own format
+(`text`, `state.opened`) *before* the timer starts. Because jsTree loads and
+refreshes asynchronously, those scenarios wait for its `ready.jstree` /
+`refresh.jstree` event; opening and closing with animation 0 is synchronous.
+
+The **li rendered** number shows a difference in strategy: tree-element puts
+the whole tree in the DOM and hides closed folders with CSS, jsTree only
+renders the children of open folders. Keep that in mind when comparing the
+`open` scenario.
+
+Adding another library means adding one adapter object in `public/bench.js`
+(`prepare`, `create`, `refresh`, `firstFolder`, `isOpen`, `open`, `close`,
+`destroy`), a `<script>`/`<link>` in `index.html`, the package name in
+`VENDOR_PACKAGES` in `server.js` and an option in the Library select.
 
 ## What is measured
 
@@ -19,14 +43,15 @@ Each run creates a fresh container, then times one of these scenarios:
 
 | Scenario  | Measured call                                    |
 | --------- | ------------------------------------------------ |
-| `render`  | `new TreeElement({ data, autoOpen, ... })`       |
-| `refresh` | `tree.refresh()` on an already rendered tree     |
-| `open`    | `tree.openNode(firstFolder)` on a closed tree    |
-| `toggle`  | `toggle()` the first folder closed and open again |
+| `render`  | create the tree: `new TreeElement({ data, autoOpen })` / `$(el).jstree({ core: { data } })` |
+| `refresh` | re-render an existing tree: `tree.refresh()` / `inst.refresh()` |
+| `open`    | open the first top-level folder of a fully closed tree |
+| `toggle`  | close and reopen the first top-level folder |
 
 Per run it reports, in milliseconds:
 
-- **construct**: synchronous JavaScript time of the call (DOM built).
+- **construct**: time of the call until the library reports it is done
+  (synchronous for tree-element, event-based for jsTree).
 - **layout**: a forced `getBoundingClientRect()` right after (style + layout).
 - **to frame / total**: from the start of the call until the browser has
   presented a frame (two `requestAnimationFrame`s).
@@ -47,7 +72,7 @@ Every form field can be preset through the query string, and `auto=1` runs
 immediately on load:
 
 ```
-http://127.0.0.1:3000/?auto=1&nodes=100000&children=10&scenario=render&autoOpen=true&runs=5&save=1
+http://127.0.0.1:3000/?auto=1&library=jstree&nodes=100000&children=10&scenario=render&autoOpen=true&runs=5&save=1
 ```
 
 When done, the page sets `window.__benchDone = true` and puts the full result
@@ -59,6 +84,7 @@ in `window.__benchResult` (also logged to the console as JSON).
 npm i -D playwright && npx playwright install chromium
 node bench-headless.mjs --nodes=100000 --runs=5
 node bench-headless.mjs --browser=firefox --scenario=refresh --headed --save
+node bench-headless.mjs --library=jstree --nodes=100000 --runs=5
 node bench-headless.mjs --help
 ```
 
@@ -82,4 +108,5 @@ then reload the page. Saved results record the version.
   `X-Generate-Ms`.
 - `GET|POST|DELETE /api/results` stored results (NDJSON on disk).
 - `GET /api/info` versions.
-- `/vendor/tree-element/*` files from the installed package.
+- `/vendor/<package>/*` files from the installed `tree-element`, `jstree` and
+  `jquery` packages.

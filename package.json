@@ -9,6 +9,8 @@
     "bench": "node bench-headless.mjs"
   },
   "dependencies": {
+    "jquery": "^4.0.0",
+    "jstree": "^3.3.17",
     "tree-element": "^0.1.1"
   },
   "devDependencies": {

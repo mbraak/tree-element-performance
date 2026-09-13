@@ -1,4 +1,4 @@
-/* global TreeElement */
+/* global TreeElement, jQuery */
 (() => {
   "use strict";
 
@@ -14,8 +14,8 @@
 
   let stopRequested = false;
   let running = false;
-  let libraryVersion = null;
-  let lastTree = null; // tree of the final run, kept visible on the page
+  let lastHandle = null; // tree of the final run, kept visible on the page
+  let lastAdapter = null;
 
   // ---- helpers -----------------------------------------------------------
 
@@ -54,6 +54,7 @@
     const autoOpen =
       autoOpenRaw === "true" ? true : autoOpenRaw === "false" ? false : Number(autoOpenRaw);
     return {
+      library: fd.get("library"),
       nodes: Number(fd.get("nodes")),
       children: Number(fd.get("children")),
       nameLength: Number(fd.get("nameLength")),
@@ -79,6 +80,13 @@
         field.value = value;
       }
     }
+  }
+
+  /** Is a node at `depth` (0 = top level) opened for this autoOpen value? */
+  function isOpenedAtDepth(autoOpen, depth) {
+    if (autoOpen === true) return true;
+    if (autoOpen === false) return false;
+    return depth <= autoOpen;
   }
 
   // ---- data --------------------------------------------------------------
@@ -110,21 +118,138 @@
     };
   }
 
-  // ---- measuring ---------------------------------------------------------
+  // ---- library adapters ----------------------------------------------------
+  //
+  // Every adapter gets the same generated data ({ id, name, children }) and
+  // implements the four scenarios. `prepare` runs outside the timer and
+  // converts/clones the data into whatever the library wants. Methods that
+  // the library completes asynchronously return a promise that resolves when
+  // the library reports it is done.
 
-  function treeOptions(config, data) {
-    return {
-      data,
-      autoOpen: config.autoOpen,
-      slide: false,
-      animationSpeed: 0,
-      dragAndDrop: config.dragAndDrop,
-      keyboardSupport: config.keyboardSupport,
-      showEmptyFolder: config.showEmptyFolder,
-      saveState: false,
-      useContextMenu: false,
-    };
-  }
+  const adapters = {
+    "tree-element": {
+      label: "tree-element",
+      available: () => typeof TreeElement === "function",
+      version: () =>
+        new TreeElement({ htmlElement: document.createElement("div"), data: [] }).getVersion(),
+
+      prepare(data) {
+        return structuredClone(data); // the library must not see reused objects
+      },
+
+      options(config, data, autoOpen = config.autoOpen) {
+        return {
+          data,
+          autoOpen,
+          slide: false,
+          animationSpeed: 0,
+          dragAndDrop: config.dragAndDrop,
+          keyboardSupport: config.keyboardSupport,
+          showEmptyFolder: config.showEmptyFolder,
+          saveState: false,
+          useContextMenu: false,
+        };
+      },
+
+      create(container, data, config, autoOpen) {
+        return new TreeElement({ htmlElement: container, ...this.options(config, data, autoOpen) });
+      },
+      refresh(tree) {
+        tree.refresh();
+      },
+      firstFolder(tree) {
+        return tree.getTree().children.find((n) => n.children && n.children.length) || null;
+      },
+      isOpen(tree, node) {
+        return Boolean(node.is_open);
+      },
+      open(tree, node) {
+        return tree.openNode(node, false);
+      },
+      close(tree, node) {
+        tree.closeNode(node, false);
+      },
+      destroy(tree) {
+        tree.deinit();
+      },
+    },
+
+    jstree: {
+      label: "jsTree",
+      available: () => typeof jQuery === "function" && Boolean(jQuery.jstree),
+      version: () => jQuery.jstree.version,
+
+      prepare(data, config) {
+        // Convert to jsTree's format; the open state lives on each node.
+        const convert = (nodes, depth) =>
+          nodes.map((n) => {
+            const out = { id: String(n.id), text: n.name };
+            if (n.children && n.children.length) {
+              out.children = convert(n.children, depth + 1);
+              out.state = { opened: isOpenedAtDepth(config.autoOpen, depth) };
+            }
+            return out;
+          });
+        return convert(data, 0);
+      },
+
+      create(container, data, config, autoOpen = config.autoOpen) {
+        if (autoOpen !== config.autoOpen) {
+          // Scenario needs a different open state than the prepared data has.
+          const setOpened = (nodes, depth) => {
+            for (const n of nodes) {
+              if (n.children) {
+                n.state = { opened: isOpenedAtDepth(autoOpen, depth) };
+                setOpened(n.children, depth + 1);
+              }
+            }
+          };
+          setOpened(data, 0);
+        }
+        const $el = jQuery(container);
+        const plugins = [];
+        if (config.dragAndDrop) plugins.push("dnd");
+        const ready = new Promise((resolve) => $el.one("ready.jstree", () => resolve()));
+        $el.jstree({
+          core: {
+            data,
+            animation: 0,
+            check_callback: true,
+            themes: { responsive: false },
+            keyboard: config.keyboardSupport ? undefined : {},
+          },
+          plugins,
+        });
+        const inst = $el.jstree(true);
+        return ready.then(() => inst);
+      },
+      refresh(inst) {
+        const done = new Promise((resolve) => inst.element.one("refresh.jstree", () => resolve()));
+        inst.refresh(true, true);
+        return done;
+      },
+      firstFolder(inst) {
+        const root = inst.get_node(jQuery.jstree.root);
+        const id = root.children.find((c) => inst.is_parent(c));
+        return id ? inst.get_node(id) : null;
+      },
+      isOpen(inst, node) {
+        return inst.is_open(node);
+      },
+      open(inst, node) {
+        // With animation 0 and loaded children this completes synchronously.
+        inst.open_node(node, null, 0);
+      },
+      close(inst, node) {
+        inst.close_node(node, 0);
+      },
+      destroy(inst) {
+        inst.destroy();
+      },
+    },
+  };
+
+  // ---- measuring ---------------------------------------------------------
 
   function makeContainer() {
     treeHost.replaceChildren();
@@ -135,16 +260,17 @@
 
   /**
    * Times `action` (sync or async) and then measures forced layout and the
-   * time until the browser has presented a frame.
+   * time until the browser has presented a frame. Returns the action's value
+   * as `value`.
    */
   async function measure(label, container, action) {
     const startMark = `${label}-start`;
     performance.mark(startMark);
     const t0 = performance.now();
-    const maybePromise = action();
-    const tConstruct = performance.now();
-    if (maybePromise && typeof maybePromise.then === "function") {
-      await maybePromise;
+    let value = action();
+    const tSync = performance.now();
+    if (value && typeof value.then === "function") {
+      value = await value;
     }
     const tAction = performance.now();
 
@@ -160,56 +286,61 @@
     performance.measure(label, startMark);
 
     return {
-      construct: tAction - t0,
-      constructSync: tConstruct - t0,
-      layout: tLayout - tAction,
-      toFrame: tFrame - t0,
-      total: tFrame - t0,
-      liCount: container.querySelectorAll("li").length,
+      value,
+      result: {
+        construct: tAction - t0,
+        constructSync: tSync - t0,
+        layout: tLayout - tAction,
+        toFrame: tFrame - t0,
+        total: tFrame - t0,
+        liCount: container.querySelectorAll("li").length,
+      },
     };
   }
 
-  async function runOnce(config, data, runIndex, keep = false) {
-    const label = `bench-${config.scenario}-${runIndex}`;
+  async function settle() {
+    await nextFrame();
+    await nextFrame();
+  }
+
+  async function runOnce(adapter, config, data, runIndex, keep = false) {
+    const label = `bench-${config.library}-${config.scenario}-${runIndex}`;
     const container = makeContainer();
-    const cloned = structuredClone(data); // the library must not see reused objects
-    let tree = null;
+    const prepared = adapter.prepare(data, config);
+    let handle = null;
     let result;
 
     try {
       if (config.scenario === "render") {
-        result = await measure(label, container, () => {
-          tree = new TreeElement({ htmlElement: container, ...treeOptions(config, cloned) });
-        });
+        const m = await measure(label, container, () => adapter.create(container, prepared, config));
+        handle = m.value;
+        result = m.result;
       } else if (config.scenario === "refresh") {
-        tree = new TreeElement({ htmlElement: container, ...treeOptions(config, cloned) });
-        await nextFrame();
-        await nextFrame();
-        result = await measure(label, container, () => tree.refresh());
+        handle = await adapter.create(container, prepared, config);
+        await settle();
+        result = (await measure(label, container, () => adapter.refresh(handle))).result;
       } else if (config.scenario === "open") {
         // Start closed, then open the first top-level folder.
-        const opts = treeOptions(config, cloned);
-        opts.autoOpen = false;
-        tree = new TreeElement({ htmlElement: container, ...opts });
-        await nextFrame();
-        await nextFrame();
-        const first = tree.getTree().children.find((n) => n.children && n.children.length);
+        handle = await adapter.create(container, prepared, config, false);
+        await settle();
+        const first = adapter.firstFolder(handle);
         if (!first) throw new Error("No folder to open");
-        result = await measure(label, container, () => tree.openNode(first, false));
+        result = (await measure(label, container, () => adapter.open(handle, first))).result;
       } else if (config.scenario === "toggle") {
-        tree = new TreeElement({ htmlElement: container, ...treeOptions(config, cloned) });
-        await nextFrame();
-        await nextFrame();
-        const first = tree.getTree().children.find((n) => n.children && n.children.length);
+        handle = await adapter.create(container, prepared, config);
+        await settle();
+        const first = adapter.firstFolder(handle);
         if (!first) throw new Error("No folder to toggle");
-        if (!first.is_open) {
-          tree.openNode(first, false);
-          await nextFrame();
+        if (!adapter.isOpen(handle, first)) {
+          await adapter.open(handle, first);
+          await settle();
         }
-        result = await measure(label, container, () => {
-          tree.toggle(first, false); // close
-          tree.toggle(first, false); // open
-        });
+        result = (
+          await measure(label, container, async () => {
+            await adapter.close(handle, first);
+            await adapter.open(handle, first);
+          })
+        ).result;
       } else {
         throw new Error(`Unknown scenario ${config.scenario}`);
       }
@@ -218,9 +349,10 @@
       // is not competing with cleanup of the previous run.
       await sleep(30);
       if (keep) {
-        lastTree = tree;
+        lastHandle = handle;
+        lastAdapter = adapter;
       } else {
-        if (tree) tree.deinit();
+        if (handle) adapter.destroy(handle);
         container.remove();
         await sleep(60);
       }
@@ -238,6 +370,7 @@
     const s = result.stats;
     const ms = (n) => `${fmt(n)}<small> ms</small>`;
     summaryEl.innerHTML = [
+      statBox("library", `${result.libraryLabel}<small> ${result.libraryVersion}</small>`),
       statBox("median total", ms(s.total.median), "primary"),
       statBox("mean total", ms(s.total.mean)),
       statBox("min / max", `${fmt(s.total.min)} / ${fmt(s.total.max)}<small> ms</small>`),
@@ -288,7 +421,8 @@
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td>${new Date(r.savedAt).toLocaleString()}</td>
-          <td class="left">${r.treeElementVersion ?? ""}</td>
+          <td class="left">${r.libraryLabel ?? r.config.library ?? "tree-element"}</td>
+          <td class="left">${r.libraryVersion ?? r.treeElementVersion ?? ""}</td>
           <td class="left">${r.config.scenario}</td>
           <td>${fmtInt(r.data.count)}</td>
           <td>${r.config.children}</td>
@@ -322,12 +456,17 @@
     stopButton.disabled = false;
     summaryEl.innerHTML = `<p class="muted">Running…</p>`;
     runsBody.innerHTML = "";
-    if (lastTree) {
-      lastTree.deinit();
-      lastTree = null;
+    if (lastHandle) {
+      lastAdapter.destroy(lastHandle);
+      lastHandle = null;
+      lastAdapter = null;
     }
 
     try {
+      const adapter = adapters[config.library];
+      if (!adapter) throw new Error(`Unknown library ${config.library}`);
+      if (!adapter.available()) throw new Error(`${config.library} is not loaded`);
+
       setStatus(`Fetching ${fmtInt(config.nodes)} nodes…`);
       const { data, info } = await fetchTree(config);
       setStatus(
@@ -337,16 +476,16 @@
 
       let warmup = null;
       if (config.warmup) {
-        setStatus("Warm-up run…");
-        warmup = await runOnce(config, data, 0);
+        setStatus(`${adapter.label}: warm-up run…`);
+        warmup = await runOnce(adapter, config, data, 0);
         renderRuns([], warmup);
       }
 
       const runs = [];
       for (let i = 1; i <= config.runs; i++) {
         if (stopRequested) break;
-        setStatus(`Run ${i} of ${config.runs}…`);
-        const r = await runOnce(config, data, i, i === config.runs);
+        setStatus(`${adapter.label}: run ${i} of ${config.runs}…`);
+        const r = await runOnce(adapter, config, data, i, i === config.runs);
         runs.push(r);
         renderRuns(runs, warmup);
       }
@@ -360,8 +499,10 @@
       const pick = (k) => stats(runs.map((r) => r[k]));
       const result = {
         config,
+        library: config.library,
+        libraryLabel: adapter.label,
+        libraryVersion: adapter.version(),
         data: info,
-        treeElementVersion: libraryVersion,
         browser: browserLabel(),
         userAgent: navigator.userAgent,
         hardwareConcurrency: navigator.hardwareConcurrency,
@@ -381,10 +522,10 @@
       setStatus(
         stopRequested
           ? `Stopped after ${runs.length} run(s).`
-          : `Done: ${runs.length} run(s), median ${fmt(result.stats.total.median)} ms.`,
+          : `Done: ${adapter.label}, ${runs.length} run(s), median ${fmt(result.stats.total.median)} ms.`,
       );
       window.__benchResult = result;
-      console.log("tree-element benchmark result", JSON.stringify(result));
+      console.log("benchmark result", JSON.stringify(result));
 
       if (config.save) {
         await saveResult(result);
@@ -419,18 +560,12 @@
 
   async function init() {
     applyQueryToForm();
-    try {
-      const info = await fetch("/api/info").then((r) => r.json());
-      libraryVersion =
-        typeof TreeElement === "function"
-          ? new TreeElement({ htmlElement: document.createElement("div"), data: [] }).getVersion()
-          : info.treeElementVersion;
-      $("#meta").textContent =
-        `tree-element ${libraryVersion} (npm ${info.treeElementVersion}) · ${browserLabel()} · ` +
-        `${navigator.hardwareConcurrency ?? "?"} cores · dpr ${window.devicePixelRatio}`;
-    } catch (err) {
-      $("#meta").textContent = `Could not load info: ${err.message}`;
-    }
+    const versions = Object.values(adapters)
+      .filter((a) => a.available())
+      .map((a) => `${a.label} ${a.version()}`)
+      .join(" · ");
+    $("#meta").textContent =
+      `${versions} · ${browserLabel()} · ${navigator.hardwareConcurrency ?? "?"} cores · dpr ${window.devicePixelRatio}`;
     await loadHistory();
 
     if (new URLSearchParams(location.search).get("auto") === "1") {
