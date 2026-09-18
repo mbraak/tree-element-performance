@@ -10,6 +10,7 @@
   const summaryEl = $("#summary");
   const runsBody = $("#runsTable tbody");
   const historyBody = $("#history tbody");
+  const bundlesBody = $("#bundles tbody");
   const treeHost = $("#treeHost");
 
   let stopRequested = false;
@@ -24,6 +25,7 @@
   const fmt = (n, digits = 1) =>
     n == null || Number.isNaN(n) ? "–" : Number(n).toFixed(digits);
   const fmtInt = (n) => (n == null ? "–" : Number(n).toLocaleString("en-US"));
+  const fmtKb = (bytes) => (bytes == null ? "–" : `${fmt(bytes / 1024, 1)} kB`);
 
   function stats(values) {
     if (!values.length) return null;
@@ -558,6 +560,43 @@
     await loadHistory();
   });
 
+  // ---- bundle size -------------------------------------------------------
+
+  async function loadBundles() {
+    let bundles;
+    try {
+      const res = await fetch("/api/bundles");
+      if (!res.ok) throw new Error(`${res.status}`);
+      bundles = await res.json();
+    } catch (err) {
+      bundlesBody.innerHTML = `<tr><td colspan="5" class="left muted">Could not load bundle sizes (${err.message})</td></tr>`;
+      return;
+    }
+    const rows = [];
+    for (const bundle of bundles) {
+      const adapter = adapters[bundle.library];
+      const label = adapter ? adapter.label : bundle.library;
+      const versions = [...new Set(bundle.files.map((f) => f.version))].join(" / ");
+      rows.push(`<tr class="total">
+        <td>${label}</td>
+        <td class="left">${bundle.files.length} file${bundle.files.length === 1 ? "" : "s"}</td>
+        <td>${versions}</td>
+        <td>${fmtKb(bundle.bytes)}</td>
+        <td>${fmtKb(bundle.gzipBytes)}</td>
+      </tr>`);
+      for (const f of bundle.files) {
+        rows.push(`<tr>
+          <td></td>
+          <td class="left file">${f.file}</td>
+          <td>${f.version}</td>
+          <td>${fmtKb(f.bytes)}</td>
+          <td>${fmtKb(f.gzipBytes)}</td>
+        </tr>`);
+      }
+    }
+    bundlesBody.innerHTML = rows.join("");
+  }
+
   async function init() {
     applyQueryToForm();
     const versions = Object.values(adapters)
@@ -566,7 +605,7 @@
       .join(" · ");
     $("#meta").textContent =
       `${versions} · ${browserLabel()} · ${navigator.hardwareConcurrency ?? "?"} cores · dpr ${window.devicePixelRatio}`;
-    await loadHistory();
+    await Promise.all([loadBundles(), loadHistory()]);
 
     if (new URLSearchParams(location.search).get("auto") === "1") {
       const result = await runBenchmark(readConfig());

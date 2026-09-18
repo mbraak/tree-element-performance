@@ -89,6 +89,20 @@
   </section>
 
   <section class="panel">
+    <h2>Bundle size</h2>
+    <p class="muted small">
+      Size of the files a page loads to use each library, as served from <code>node_modules</code>.
+      jsTree needs jQuery, so that is counted as part of its bundle. Gzip is at level 9.
+    </p>
+    <table id="bundles" class="table">
+      <thead><tr>
+        <th>library</th><th class="left">file</th><th>version</th><th>size</th><th>gzip</th>
+      </tr></thead>
+      <tbody><tr><td colspan="5" class="left muted">loading…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="panel">
     <h2>Tree</h2>
     <p class="muted small">The tree below is the one being measured, rendered in a scrollable box.</p>
     <div id="treeHost" class="tree-host"></div>
