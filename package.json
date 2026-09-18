@@ -11,7 +11,7 @@
   "dependencies": {
     "jquery": "^4.0.0",
     "jstree": "^3.3.17",
-    "tree-element": "^0.1.1"
+    "tree-element": "^0.2.0"
   },
   "devDependencies": {
     "playwright": "^1.63.0"
