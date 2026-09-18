@@ -6,6 +6,7 @@ import http from "node:http";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +32,53 @@ const MIME = {
 const treeElementVersion = JSON.parse(
   fs.readFileSync(path.join(VENDOR_DIR, "package.json"), "utf8"),
 ).version;
+
+// Files a page has to load to use each library, exactly as index.html does.
+// jsTree needs jQuery, so that is counted as part of its bundle.
+const BUNDLES = [
+  {
+    library: "tree-element",
+    files: ["tree-element/tree_element.js", "tree-element/tree_element.css"],
+  },
+  {
+    library: "jstree",
+    files: [
+      "jstree/dist/jstree.min.js",
+      "jstree/dist/themes/default/style.min.css",
+      "jquery/dist/jquery.min.js",
+    ],
+  },
+];
+
+function packageVersion(pkg) {
+  return JSON.parse(
+    fs.readFileSync(path.join(__dirname, "node_modules", pkg, "package.json"), "utf8"),
+  ).version;
+}
+
+/** Raw and gzipped size of every file in BUNDLES, computed once at startup. */
+function measureBundles() {
+  return BUNDLES.map(({ library, files }) => {
+    const entries = files.map((file) => {
+      const data = fs.readFileSync(path.join(__dirname, "node_modules", file));
+      return {
+        file,
+        package: file.split("/")[0],
+        version: packageVersion(file.split("/")[0]),
+        bytes: data.length,
+        gzipBytes: zlib.gzipSync(data, { level: 9 }).length,
+      };
+    });
+    return {
+      library,
+      files: entries,
+      bytes: entries.reduce((sum, e) => sum + e.bytes, 0),
+      gzipBytes: entries.reduce((sum, e) => sum + e.gzipBytes, 0),
+    };
+  });
+}
+
+const bundles = measureBundles();
 
 /**
  * Builds a balanced tree with `total` nodes where each folder gets up to
@@ -158,6 +206,10 @@ const server = http.createServer(async (req, res) => {
         node: process.version,
         platform: `${process.platform} ${process.arch}`,
       });
+    }
+
+    if (pathname === "/api/bundles") {
+      return sendJson(res, 200, bundles);
     }
 
     if (pathname === "/api/tree") {

@@ -35,7 +35,15 @@ renders the children of open folders. Keep that in mind when comparing the
 Adding another library means adding one adapter object in `public/bench.js`
 (`prepare`, `create`, `refresh`, `firstFolder`, `isOpen`, `open`, `close`,
 `destroy`), a `<script>`/`<link>` in `index.html`, the package name in
-`VENDOR_PACKAGES` in `server.js` and an option in the Library select.
+`VENDOR_PACKAGES` and its files in `BUNDLES` in `server.js` and an option in
+the Library select.
+
+## Bundle size
+
+The **Bundle size** panel lists the files a page has to load for each library
+(JS and CSS as served from `node_modules`, jQuery counted with jsTree), with
+their raw and gzipped (level 9) size. The server measures them once at startup
+and serves them at `GET /api/bundles`.
 
 ## What is measured
 
@@ -108,5 +116,6 @@ then reload the page. Saved results record the version.
   `X-Generate-Ms`.
 - `GET|POST|DELETE /api/results` stored results (NDJSON on disk).
 - `GET /api/info` versions.
+- `GET /api/bundles` raw and gzipped size of each library's files.
 - `/vendor/<package>/*` files from the installed `tree-element`, `jstree` and
   `jquery` packages.
